@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# Dockerfile for MinerU Core - Model Inference Backend
+# Target: RHEL 8/9, Docker 19.03.15+, NVIDIA Tesla L2
+
+FROM nvidia/cuda:12.2.0-base-ubuntu22.04
+
+# Prevent Python from creating .pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    curl \
+    git \
+    wget \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements first
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Expose port
+EXPOSE 8003
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=20s --start-period=300s --retries=3 \
+    CMD curl -fs http://localhost:8003/health || exit 1
+
+# Run with uvicorn
+CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003", "--workers", "2"]

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Requirements for Agentic Wiki service
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+pydantic==2.9.2
+qdrant-client==1.10.1
+neo4j==5.25.0
+redis==5.0.8
+minio==7.2.8
+python-dotenv==1.0.1
