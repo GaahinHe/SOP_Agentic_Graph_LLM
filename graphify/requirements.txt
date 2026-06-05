@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Requirements for Graphify service
+# Knowledge graph construction with LLM dual-path entity/relation extraction
 
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
@@ -10,3 +11,6 @@ qdrant-client==1.10.1
 redis==5.0.8
 minio==7.2.8
 python-dotenv==1.0.1
+
+# Embedding for vector storage
+sentence-transformers>=2.7.0
