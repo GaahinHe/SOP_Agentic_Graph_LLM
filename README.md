@@ -1,203 +1,189 @@
-# SPDX-License-Identifier: MIT
-# Agentic Graph LLM Document Pipeline
+# SOP Agentic Graph LLM — 文档解析管线
 
-A production-ready document processing pipeline for extracting, understanding, and querying unstructured documents using multiple AI services.
+> 基于多Agent协作的非结构化文档解析、知识图谱构建与检索增强生成系统。生产环境验证于 **RHEL 8/9 + Docker 19.03.15 + NVIDIA Tesla L2**。
 
-## Architecture Overview
+---
+
+## 系统架构
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Docker Network (pipeline)                          │
-│                                                                             │
-│  ┌──────────┐  ┌─────────────┐  ┌──────────────┐  ┌───────────┐           │
-│  │  MinIO   │  │ PostgreSQL  │  │    Redis     │  │  Qdrant   │           │
-│  │ :9000    │  │   :5432     │  │   :6379      │  │  :6333    │           │
-│  └──────────┘  └─────────────┘  └──────────────┘  └───────────┘           │
-│                                                   │                        │
-│                     ┌─────────────────────────────┼────────────────────┐  │
-│                     │                             │                    │  │
-│              ┌──────┴──────┐              ┌───────┴──────┐        ┌──────┴──┐
-│              │   Neo4j     │              │  Graphify   │        │ MinerU  │
-│              │ :7474 :7687 │              │   :8004     │        │ :8002   │
-│              └─────────────┘              └─────────────┘        └─────────┘
-│                     │                             │                    │
-│         ┌───────────┼───────────┐                  │                    │
-│         │           │           │                  │                    │
-│  ┌──────┴──┐  ┌─────┴────┐  ┌──┴────┐        ┌─────┴─────┐        ┌────┴────┐
-│  │  MyMuPDF│  │Agentic  │  │Agentic│        │  Agentic  │        │ MinerU  │
-│  │  :8001  │  │  RAG    │  │ Wiki  │        │  RAG      │        │ Core    │
-│  │         │  │ :8005   │  │ :8006 │        │ :8005     │        │ :8003   │
-│  └─────────┘  └─────────┘  └───────┘        └───────────┘        └─────────┘
-└─────────────────────────────────────────────────────────────────────────────┘
+                            ┌──────────────────────────────────────────────┐
+                            │              Docker Network (pipeline)         │
+                            │                                              │
+┌──────────┐  ┌─────────────┴────┐   ┌──────────────────────────────┐    │
+│  MinIO   │  │    PostgreSQL    │   │         Qdrant                 │    │
+│  :9000   │  │      :5432       │   │   :6333 HTTP  :6334 gRPC      │    │
+└──────────┘  └──────────────────┘   └──────────────────────────────┘    │
+                                                           │              │
+                     ┌──────────────┐  ┌───────────────────┴────────────┐ │
+                     │    Redis     │  │           Neo4j                 │ │
+                     │    :6379     │  │     :7474 HTTP  :7687 Bolt      │ │
+                     └──────────────┘  └────────────────────────────────┘ │
+                                          │                                │
+                     ┌────────────────────┼────────────────────────────────┤
+                     │                    │                                 │
+            ┌────────┴───────┐  ┌─────────┴────────┐  ┌─────────────────┴┐
+            │   MyMuPDF       │  │   MinerU          │  │   Graphify       │
+            │   :8001         │  │   :8002  :8003    │  │   :8004          │
+            └────────┬────────┘  └────────┬──────────┘  └────────┬─────────┘
+                     │                    │                      │
+                     └────────────────────┼──────────────────────┘
+                                          │
+                               ┌──────────┴──────────┐
+                               │   Agentic RAG        │
+                               │   :8005              │
+                               └──────────┬──────────┘
+                                          │
+                               ┌──────────┴──────────┐
+                               │   Agentic Wiki       │
+                               │   :8006              │
+                               └──────────────────────┘
 ```
 
-## Services
+## 微服务说明
 
-| Service | Port | Description |
-|---------|------|-------------|
-| **MyMuPDF** | 8001 | Document preprocessing - OCR, layout detection, text extraction |
-| **MinerU** | 8002 | Document structure extraction - formulas, tables, images |
-| **Graphify** | 8004 | Knowledge graph construction - entity and relationship extraction |
-| **Agentic RAG** | 8005 | Multi-agent retrieval system - vector + graph search |
-| **Agentic Wiki** | 8006 | Interactive knowledge base with semantic search |
+| 服务 | 端口 | 职责 |
+|------|------|------|
+| **MyMuPDF** | 8001 | 文档预处理：OCR、布局检测、文本提取 |
+| **MinerU Core** | 8003 | 文档深度理解：公式/表格/图片提取（GPU加速） |
+| **MinerU Wrapper** | 8002 | API封装与任务编排 |
+| **Graphify** | 8004 | 知识图谱构建：实体抽取 → Neo4j |
+| **Agentic RAG** | 8005 | 多Agent RAG：向量+图检索、重新排序 |
+| **Agentic Wiki** | 8006 | 交互式知识库前端 |
 
-## Infrastructure Services
+## 基础设施
 
-| Service | Port | Description |
-|---------|------|-------------|
-| **MinIO** | 9000/9001 | S3-compatible object storage |
-| **PostgreSQL** | 5432 | Metadata storage |
-| **Redis** | 6379 | Caching and job queue |
-| **Qdrant** | 6333/6334 | Vector database for similarity search |
-| **Neo4j** | 7474/7687 | Graph database for knowledge representation |
+| 服务 | 端口 | 用途 |
+|------|------|------|
+| MinIO | 9000/9001 | S3兼容对象存储 |
+| PostgreSQL | 5432 | 元数据存储 |
+| Redis | 6379 | 缓存与任务队列 |
+| Qdrant | 6333/6334 | 向量数据库 |
+| Neo4j | 7474/7687 | 图数据库 |
 
-## Quick Start
-
-### Prerequisites
-
-- Docker 19.03.15+
-- NVIDIA Docker runtime (for GPU support)
-- 32GB+ RAM recommended
-- 200GB+ disk space
-
-### Deployment
+## 快速开始
 
 ```bash
-# 1. Clone repository
-git clone <repository-url>
-cd SOP_Agentic_Graph_LLM
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# 3. Check prerequisites
+# 1. 环境检查（首次部署）
 make check
 
-# 4. Start all services
+# 2. 环境配置（安装 nvidia-docker2 等）
+make setup
+
+# 3. 编辑配置
+cp .env.example .env
+# 填入 LLM_API_KEY 等敏感配置
+
+# 4. 启动所有服务
 make start
 
-# 5. View service status
+# 5. 查看服务状态
 make status
 
-# 6. Tail logs
-make logs
+# 6. 查看日志
+make logs SERVICE=mymupdf
 ```
 
-## Makefile Commands
+## 环境要求
 
-```bash
-make help          # Show all available commands
-make setup         # Install prerequisites and prepare environment
-make check         # Verify system prerequisites
-make start         # Start all pipeline services
-make stop          # Stop all services
-make restart       # Restart all services
-make status        # Show container status
-make logs          # Tail logs from all services
-make clean         # Remove containers and volumes
-make test          # Run connectivity and health checks
+| 组件 | 最低要求 |
+|------|---------|
+| CPU | 16核+ |
+| 内存 | 200GB |
+| GPU | NVIDIA Tesla L2 (24GB) 或同等 |
+| 存储 | 500GB SSD |
+| Docker | 19.03.15+ |
+| Docker Compose | 1.27+ |
+
+## SELinux 配置
+
+RHEL 默认 Enforcing，卷挂载时需使用 `:z` 标签，docker-compose.yml 已配置。
+
+## 目录结构
+
+```
+SOP_Agentic_Graph_LLM/
+├── docker-compose.yml      # 服务编排
+├── Makefile                # 便捷命令
+├── .env.example            # 环境变量模板
+├── .gitignore
+├── README.md
+├── monitoring/
+│   └── prometheus.yml
+├── scripts/
+│   ├── check_prerequisites.sh
+│   ├── setup_environment.sh
+│   ├── network_check.sh
+│   ├── start_services.sh
+│   └── stop_services.sh
+├── mymupdf/
+├── mineru/
+├── graphify/
+├── agentic-rag/
+└── agentic-wiki/
 ```
 
-## Environment Variables
+## 健康检查
 
-Key environment variables (see `.env.example` for full list):
+所有服务暴露 `GET /health` 端点：
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `COMPOSE_PROJECT_NAME` | Docker Compose project name | `pipeline` |
-| `LLM_API_KEY` | API key for LLM services | - |
-| `MINIO_ROOT_USER` | MinIO access key | `minioadmin` |
-| `MINIO_ROOT_PASSWORD` | MinIO secret key | `changeme` |
-| `NEO4J_PASSWORD` | Neo4j password | `changeme` |
-| `ENABLE_GPU` | Enable GPU support | `true` |
-| `CUDA_VISIBLE_DEVICES` | GPU device IDs | `0` |
-
-## Hardware Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| CPU | 8 cores | 16 cores |
-| RAM | 16 GB | 32 GB |
-| GPU | NVIDIA Tesla L2 (24GB) | NVIDIA Tesla L2 |
-| Disk | 200 GB SSD | 500 GB SSD |
-
-## Target Platform
-
-Validated for:
-- **OS**: RHEL 8/9
-- **Docker**: 19.03.15+
-- **NVIDIA Driver**: 535.161.08 (CUDA 12.2)
-- **GPU**: NVIDIA Tesla L2
-
-## Data Flow
-
-1. **Ingest**: Document uploaded to MinIO object storage
-2. **Preprocess**: MyMuPDF extracts text and performs OCR
-3. **Structure**: MinerU identifies formulas, tables, images
-4. **Graph**: Graphify builds knowledge graph in Neo4j
-5. **Index**: Document chunks indexed in Qdrant vector DB
-6. **Query**: Agentic RAG retrieves relevant context via vector + graph search
-7. **Answer**: LLM generates answer from retrieved context
-
-## API Endpoints
-
-### MyMuPDF
-- `POST /process` - Process PDF/image document
-- `GET /status/{doc_id}` - Get processing status
-
-### MinerU
-- `POST /process` - Extract structured content
-
-### Graphify
-- `POST /build` - Build knowledge graph
-- `GET /graph/{doc_id}` - Retrieve graph
-- `GET /stats` - Graph statistics
-
-### Agentic RAG
-- `POST /query` - Query with RAG
-- `WS /ws` - WebSocket for streaming
-
-### Agentic Wiki
-- `GET /wiki` - List pages
-- `POST /wiki` - Create page
-- `POST /search` - Search knowledge base
-- `GET /ui` - Web interface
-
-## Monitoring
-
-Optional monitoring stack:
 ```bash
-# Start with monitoring
-docker-compose --profile monitoring up -d
+# 批量检查
+for port in 8001 8002 8003 8004 8005 8006; do
+  echo -n "Port $port: "
+  curl -sf "http://localhost:$port/health" && echo "OK" || echo "FAIL"
+done
 ```
 
-Access points:
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000
+## 数据流
 
-## Troubleshooting
-
-### Check prerequisites
-```bash
-bash scripts/check_prerequisites.sh
+```
+上传文档 → MinIO → MyMuPDF (OCR+布局)
+                              ↓
+                       MinerU (深度理解)
+                              ↓
+                  ┌───────────┴───────────┐
+                  ↓                       ↓
+            Graphify (图谱)          向量化 (embedding)
+                  ↓                       ↓
+            Neo4j                  Qdrant
+                  └───────────┬───────────┘
+                              ↓
+                    Agentic RAG (检索)
+                              ↓
+                      Agentic Wiki (前端)
 ```
 
-### Check network connectivity
+## 故障排查
+
 ```bash
+# 检查 NVIDIA 驱动
+nvidia-smi
+
+# 测试 GPU 容器
+docker run --rm --gpus all nvidia/cuda:12.2.0-base nvidia-smi
+
+# 查看所有容器日志
+docker-compose logs -f
+
+# 进入容器调试
+docker exec -it pipeline-mymupdf bash
+
+# 检查网络连通性
 bash scripts/network_check.sh
+
+# 强制清理（紧急）
+make stop
+bash scripts/stop_services.sh --force
 ```
 
-### View service logs
-```bash
-docker-compose logs -f <service-name>
-```
+## 验证环境
 
-### Restart a specific service
-```bash
-docker-compose restart <service-name>
-```
+- **OS**: RHEL 8.9
+- **Docker**: 19.03.15
+- **NVIDIA Driver**: 535.161.08 (CUDA 12.2)
+- **GPU**: NVIDIA Tesla L2 (24GB)
 
-## License
+---
 
-MIT License - See LICENSE file for details
+**最后更新**: 2026-06-05

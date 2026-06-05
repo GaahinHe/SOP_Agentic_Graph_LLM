@@ -1,0 +1,91 @@
+# Prometheus configuration for SOP Agentic Graph LLM Pipeline
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'sop-pipeline'
+    environment: 'production'
+
+scrape_configs:
+  # Infrastructure
+  - job_name: 'minio'
+    static_configs:
+      - targets: ['minio:9000']
+        labels:
+          service: 'minio'
+          group: 'storage'
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+        labels:
+          service: 'postgres'
+          group: 'database'
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+        labels:
+          service: 'redis'
+          group: 'cache'
+
+  # Document Processing
+  - job_name: 'mymupdf'
+    static_configs:
+      - targets: ['mymupdf:8001']
+        labels:
+          service: 'mymupdf'
+          group: 'document-processing'
+
+  - job_name: 'mineru'
+    static_configs:
+      - targets: ['mineru-wrapper:8002']
+        labels:
+          service: 'mineru-wrapper'
+          group: 'document-processing'
+
+  - job_name: 'mineru-core'
+    static_configs:
+      - targets: ['mineru-core:8003']
+        labels:
+          service: 'mineru-core'
+          group: 'document-processing'
+
+  # Knowledge Graph
+  - job_name: 'graphify'
+    static_configs:
+      - targets: ['graphify:8004']
+        labels:
+          service: 'graphify'
+          group: 'knowledge-graph'
+
+  # Agentic Services
+  - job_name: 'agentic-rag'
+    static_configs:
+      - targets: ['agentic-rag:8005']
+        labels:
+          service: 'agentic-rag'
+          group: 'agents'
+
+  - job_name: 'agentic-wiki'
+    static_configs:
+      - targets: ['agentic-wiki:8006']
+        labels:
+          service: 'agentic-wiki'
+          group: 'agents'
+
+  # Vector & Graph DB
+  - job_name: 'qdrant'
+    static_configs:
+      - targets: ['qdrant:6333']
+        labels:
+          service: 'qdrant'
+          group: 'vector-db'
+
+  - job_name: 'neo4j'
+    static_configs:
+      - targets: ['neo4j:7474']
+        labels:
+          service: 'neo4j'
+          group: 'graph-db'
